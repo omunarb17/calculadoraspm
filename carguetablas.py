@@ -8,9 +8,13 @@ def cargar_tabla(filepath, hoja):
 def get_lx(tabla, edad):
     fila = tabla[tabla['x'] == edad]
     if not fila.empty:
-        return float(str(fila.iloc[0]['lx']).replace(".", "").replace(",", "."))
+        lx_valor = float(str(fila.iloc[0]['lx']).replace(".", "").replace(",", "."))
+        print(f"[DEBUG] lx para edad {edad}: {lx_valor}")  # 🔍 Depuración en consola
+        return lx_valor
     else:
+        #print(f"[DEBUG] Edad {edad} no encontrada en la tabla lx.")  # ⚠️ Si no encuentra
         return 0.0
+
 
 def calcular_a(tabla_afiliado, edad_afiliado, v, tabla_conyuge=None, edad_conyuge=None):
     lx_a = get_lx(tabla_afiliado, edad_afiliado)
@@ -88,29 +92,53 @@ def calcular_spm_final(SMMLV, a, A, v, K, m, n, r):
     U = (v / (1 + K)) ** (1 / 12)
 
     # Cálculo de f12 y f2
-    f12 = (1 + (11 - 24) * K) / (1 + K)
-    f2 = (1 + (1 / 4) * K) / (1 + K)
+    if K != 0:
+            f12 = ((1 + 11*K/24))/ (1+ K)
+            f2 = (1 +(K/4)) / (1+K)
+    else:
+            f12 = 1 / 12
+            f2 = 1 / 2
+
 
     # Cálculo de C según el mes
     if m == 1:
         C = 0
     elif 1 < m <= 6:
-        C = (U - U ** (n + 1)) / (1 - U) + U ** r
+        C = ((U - U ** (n + 1)) / (1 - U)) + (U ** r ) + U ** n
     else:  # m > 6
-        C = (U - U ** (n + 1)) / (1 - U) + U ** n
+        C = ((U - U ** (n + 1)) / (1 - U)) + U ** n
 
-    # Cálculo del SPM
-    base = (12 * f12 + 2 * f2) * a + 6 + 5 * A
-    spm = 1.05 * SMMLV * base * ((1 + K_estrella) * (U ** n)) + C
+    
+    
+    SMMLV2 = 1423500  # Valor fijo para referencia normativa
+    P = SMMLV  # Este es el valor imputado por el usuario
+
+    # Ajuste según la pensión deseada
+    if P < 5 * SMMLV2:
+        factor_A = 5
+    elif 5 * SMMLV2 <= P <= 10 * SMMLV2:
+        factor_A = 1
+    else:  # P > 10 * SMMLV2
+        factor_A = 10
+
+    A_modificado = factor_A * A
+
+    # Cálculo del SPM base con A ajustado
+    base = (12 * f12 + 2 * f2) * a + 6 + A_modificado
+    
+    #cambiamos 1.05 por 1.02
+    spm = 1.02 * SMMLV * (((12 * f12 + 2 * f2) * a + 6 + A_modificado)*(1 + K_estrella) * (U ** n) + C)
 
     return {
         "SPM": spm,
         "base_valor": base,
+        "AuxilioFunerario":A_modificado,
         "f12": f12,
         "f2": f2,
         "K*": K_estrella,
         "U": U,
         "C": C
+        
     }
 
 
@@ -119,3 +147,56 @@ def formato_colombiano(valor, decimales=2):
     if isinstance(valor, (int, float)):
         return f"{valor:,.{decimales}f}".replace(",", "X").replace(".", ",").replace("X", ".")
     return valor
+
+
+def calcular_pension(SPM, a, A, v, K, m, n, r):
+    K_estrella = 0 if m == 1 else K
+
+    # Cálculo de U
+    U = (v / (1 + K)) ** (1 / 12)
+
+    # Cálculo de f12 y f2
+    if K != 0:
+        f12 = ((1 + 11 * K / 24)) / (1 + K)
+        f2 = (1 + (K / 4)) / (1 + K)
+    else:
+        f12 = 1 / 12
+        f2 = 1 / 2
+
+    # Cálculo de C según el mes
+    if m == 1:
+        C = 0
+    elif 1 < m <= 6:
+        C = ((U - U ** (n + 1)) / (1 - U)) + (U ** r) + U ** n
+    else:  # m > 6
+        C = ((U - U ** (n + 1)) / (1 - U)) + U ** n
+
+    SMMLV2 = 1423500  # Valor fijo para referencia normativa
+
+    # Cálculo inicial de la pensión
+    P_inicial = SPM / (1.02 * (((12 * f12 + 2 * f2) * a + 6 + A) * (1 + K_estrella) * (U ** n) + C))
+
+    # Ajuste del auxilio funerario según la pensión inicial
+    if P_inicial < 5 * SMMLV2:
+        factor_A = 5
+    elif 5 * SMMLV2 <= P_inicial <= 10 * SMMLV2:
+        factor_A = 1
+    else:  # P_inicial > 10 * SMMLV2
+        factor_A = 10
+
+    A_modificado = factor_A * A
+
+    # Cálculo final de la pensión con A ajustado
+    base = (12 * f12 + 2 * f2) * a + 6 + A_modificado
+    Pension = SPM / (1.02 * (base * (1 + K_estrella) * (U ** n) + C))
+
+    return {
+        "Pension": Pension,
+        "base_valor": base,
+        "AuxilioFunerario": A_modificado,
+        "f12": f12,
+        "f2": f2,
+        "K*": K_estrella,
+        "U": U,
+        "C": C
+    }
